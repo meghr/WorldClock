@@ -1,0 +1,307 @@
+
+
+import org.testng.annotations.*;
+import static org.testng.Assert.*;
+
+public class PositionManagementTests {
+    private Client client;
+    private Market market;
+    private int initialLongPosition;
+    private int initialLocate;
+    private int initialTotalAvailability;
+
+    @BeforeMethod
+    public void setup() {
+        client = new Client();
+        market = new Market();
+        initialLongPosition = 500;
+        initialLocate = 1000;
+        initialTotalAvailability = initialLongPosition + initialLocate;
+        
+        client.setLongPosition(initialLongPosition);
+        client.setLocate(initialLocate);
+    }
+
+    @Test
+    public void testBuyOrderAcknowledged() {
+        client.sendOrder("BUY", 100);
+        market.receiveOrder("BUY", 100);
+        market.ackOrder();
+        client.receiveAckOrder();
+        
+        Assert.assertEquals(client.getLongPosition(), initialLongPosition, 
+            "Expected Long Position: " + initialLongPosition + ", but got: " + client.getLongPosition());
+    }
+
+    @Test
+    public void testBuyOrderExecuted() {
+        client.sendOrder("BUY", 100);
+        market.receiveOrder("BUY", 100);
+        market.executeOrder();
+        client.receiveExecution();
+        
+        Assert.assertEquals(client.getLongPosition(), initialLongPosition + 100, 
+            "Expected Long Position: " + (initialLongPosition + 100) + ", but got: " + client.getLongPosition());
+        Assert.assertEquals(client.getTotalAvailability(), initialTotalAvailability + 100,
+            "Expected Total Availability: " + (initialTotalAvailability + 100) + ", but got: " + client.getTotalAvailability());
+    }
+
+    @Test
+    public void testSellOrderExecuted() {
+        client.sendOrder("SELL", 100);
+        market.receiveOrder("SELL", 100);
+        market.executeOrder();
+        client.receiveExecution();
+        
+        Assert.assertEquals(client.getLongPosition(), initialLongPosition - 100,
+            "Expected Long Position: " + (initialLongPosition - 100) + ", but got: " + client.getLongPosition());
+        Assert.assertEquals(client.getTotalAvailability(), initialTotalAvailability - 100,
+            "Expected Total Availability: " + (initialTotalAvailability - 100) + ", but got: " + client.getTotalAvailability());
+    }
+
+    @Test
+    public void testShortSellOrderExecuted() {
+        client.sendOrder("SHORT_SELL", 100);
+        market.receiveOrder("SHORT_SELL", 100);
+        market.executeOrder();
+        client.receiveExecution();
+        
+        Assert.assertEquals(client.getLocate(), initialLocate - 100,
+            "Expected Locate: " + (initialLocate - 100) + ", but got: " + client.getLocate());
+        Assert.assertEquals(client.getTotalAvailability(), initialTotalAvailability,
+            "Expected Total Availability: " + initialTotalAvailability + ", but got: " + client.getTotalAvailability());
+    }
+
+    @Test
+    public void testOrderCancellation() {
+        client.sendOrder("SHORT_SELL", 100);
+        market.receiveOrder("SHORT_SELL", 100);
+        market.ackOrder();
+        client.receiveAckOrder();
+        
+        Assert.assertEquals(client.getLocate(), initialLocate - 100,
+            "Expected Locate after ack: " + (initialLocate - 100) + ", but got: " + client.getLocate());
+        
+        client.sendCancelRequest();
+        market.receiveCancelRequest();
+        market.cancelOrder();
+        client.receiveCancellation();
+        
+        Assert.assertEquals(client.getLocate(), initialLocate,
+            "Expected Locate after cancel: " + initialLocate + ", but got: " + client.getLocate());
+    }
+
+    @Test
+    public void testOrderAmendment() {
+        client.sendOrder("SHORT_SELL", 100);
+        market.receiveOrder("SHORT_SELL", 100);
+        market.ackOrder();
+        client.receiveAckOrder();
+        
+        client.sendAmendRequest(150);  // Amend quantity to 150
+        market.receiveAmendRequest(150);
+        market.amendOrder();
+        client.receiveAmendment();
+        
+        Assert.assertEquals(client.getLocate(), initialLocate - 150,
+            "Expected Locate after amend: " + (initialLocate - 150) + ", but got: " + client.getLocate());
+    }
+
+    @Test
+    public void testInsufficientPositionForSell() {
+        client.setLongPosition(50);  // Set low long position
+        
+        client.sendOrder("SELL", 100);
+        market.receiveOrder("SELL", 100);
+        market.rejectOrder("Insufficient long position");
+        client.receiveRejection();
+        
+        Assert.assertEquals(client.getLongPosition(), 50,
+            "Expected Long Position to remain: 50, but got: " + client.getLongPosition());
+    }
+
+    @Test
+    public void testInsufficientLocateForShortSell() {
+        client.setLocate(50);  // Set low locate
+        
+        client.sendOrder("SHORT_SELL", 100);
+        market.receiveOrder("SHORT_SELL", 100);
+        market.rejectOrder("Insufficient locate");
+        client.receiveRejection();
+        
+        Assert.assertEquals(client.getLocate(), 50,
+            "Expected Locate to remain: 50, but got: " + client.getLocate());
+    }
+
+    @Test
+    public void testMultipleOrdersImpactOnPositions() {
+        // Execute buy order
+        client.sendOrder("BUY", 100);
+        market.receiveOrder("BUY", 100);
+        market.executeOrder();
+        client.receiveExecution();
+        
+        int expectedLong = initialLongPosition + 100;
+        Assert.assertEquals(client.getLongPosition(), expectedLong,
+            "Expected Long Position after buy: " + expectedLong + ", but got: " + client.getLongPosition());
+        
+        // Execute short sell order
+        client.sendOrder("SHORT_SELL", 50);
+        market.receiveOrder("SHORT_SELL", 50);
+        market.executeOrder();
+        client.receiveExecution();
+        
+        Assert.assertEquals(client.getLocate(), initialLocate - 50,
+            "Expected Locate after short sell: " + (initialLocate - 50) + ", but got: " + client.getLocate());
+        Assert.assertEquals(client.getLongPosition(), expectedLong,
+            "Expected Long Position unchanged after short sell: " + expectedLong + ", but got: " + client.getLongPosition());
+    }
+	
+	@Test
+    public void testZeroLongPositionForSell() {
+        client.setLongPosition(0);  // Set long position to zero
+        
+        client.sendOrder("SELL", 100);
+        market.receiveOrder("SELL", 100);
+        market.rejectOrder("No long position available for sell");
+        client.receiveRejection();
+        
+        Assert.assertEquals(client.getLongPosition(), 0,
+            "Expected Long Position to remain: 0, but got: " + client.getLongPosition());
+    }
+	
+	@Test
+    public void testZeroLocateForShortSell() {
+        client.setLocate(0);  // Set locate to zero
+        
+        client.sendOrder("SHORT_SELL", 100);
+        market.receiveOrder("SHORT_SELL", 100);
+        market.rejectOrder("No locate available for short sell");
+        client.receiveRejection();
+        
+        Assert.assertEquals(client.getLocate(), 0,
+            "Expected Locate to remain: 0, but got: " + client.getLocate());
+        Assert.assertEquals(client.getTotalAvailability(), client.getLongPosition(),
+            "Expected Total Availability to equal Long Position when Locate is zero");
+    }
+	
+}
+
+
+------
+
+### Test Scenarios for Position and Locate Management
+
+**Initial Setup:**
+- Locate = x
+- Long Position = y
+- Total Availability = x + y
+
+---
+
+**Scenario 1: Buy Order (Acknowledged)**
+- Send Buy Order with Quantity = n
+- Order gets acknowledged
+- Verify:
+  - Locate = x
+  - Long Position = y
+  - Total Availability = x + y
+
+**Scenario 2: Buy Order (Executed)**
+- Send Buy Order with Quantity = n
+- Order gets executed
+- Verify:
+  - Locate = x
+  - Long Position = y + n
+  - Total Availability = x + y + n
+
+**Scenario 3: Sell Order (Acknowledged)**
+- Send Sell Order with Quantity = m
+- Order gets acknowledged
+- Verify:
+  - Locate = x
+  - Long Position = y + n - m
+  - Total Availability = x + y + n - m
+
+**Scenario 4: Sell Order (Executed)**
+- Send Sell Order with Quantity = m
+- Order gets executed
+- Verify:
+  - Locate = x
+  - Long Position = y + n - m
+  - Total Availability = x + y + n - m
+
+**Scenario 5: Short Sell Order (Acknowledged)**
+- Send Short Sell Order with Quantity = o
+- Order gets acknowledged
+- Verify:
+  - Locate = x - o
+  - Long Position = y + n - m
+  - Total Availability = x + y + n - m - o
+
+**Scenario 6: Short Sell Order (Executed)**
+- Send Short Sell Order with Quantity = o
+- Order gets executed
+- Verify:
+  - Locate = x - o
+  - Long Position = y + n - m
+  - Total Availability = x + y + n - m - o
+
+**Scenario 7: Prevent Sell Order if Long Position < 0**
+- Long Position = -1
+- Send Sell Order with Quantity = m
+- Verify Order Rejection
+
+**Scenario 8: Prevent Short Sell Order if Locate < 0**
+- Locate = -1
+- Send Short Sell Order with Quantity = o
+- Verify Order Rejection
+
+**Scenario 9: Cancel Buy Order (Unexecuted)**
+- Send Buy Order with Quantity = n
+- Cancel Order before execution
+- Verify:
+  - Locate = x
+  - Long Position = y
+  - Total Availability = x + y
+
+**Scenario 10: Cancel Sell Order (Unexecuted)**
+- Send Sell Order with Quantity = m
+- Cancel Order before execution
+- Verify:
+  - Locate = x
+  - Long Position = y + n
+  - Total Availability = x + y + n
+
+**Scenario 11: Cancel Short Sell Order (Unexecuted)**
+- Send Short Sell Order with Quantity = o
+- Cancel Order before execution
+- Verify:
+  - Locate = x
+  - Long Position = y + n - m
+  - Total Availability = x + y + n - m
+
+**Scenario 12: Rejected Buy Order**
+- Send Buy Order with Quantity = n
+- Order gets rejected
+- Verify:
+  - Locate = x
+  - Long Position = y
+  - Total Availability = x + y
+
+**Scenario 13: Rejected Sell Order**
+- Send Sell Order with Quantity = m
+- Order gets rejected
+- Verify:
+  - Locate = x
+  - Long Position = y + n
+  - Total Availability = x + y + n
+
+**Scenario 14: Rejected Short Sell Order**
+- Send Short Sell Order with Quantity = o
+- Order gets rejected
+- Verify:
+  - Locate = x
+  - Long Position = y + n - m
+  - Total Availability = x + y + n - m
+
